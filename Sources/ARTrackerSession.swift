@@ -150,7 +150,7 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
             let faces = geom.faces
             for f in 0..<faces.count {
                 let tri = faces.triangle(at: f)
-                obj += "f \(tri.0 + vertexOffset) \(tri.1 + vertexOffset) \(tri.2 + vertexOffset)\n"
+                obj += "f \(Int(tri.0) + vertexOffset) \(Int(tri.1) + vertexOffset) \(Int(tri.2) + vertexOffset)\n"
             }
             vertexOffset += verts.count
         }
