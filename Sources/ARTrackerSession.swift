@@ -149,7 +149,7 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
             }
             let faces = geom.faces
             for f in 0..<faces.count {
-                let tri = faces[f]
+                let tri = faces.triangle(at: f)
                 obj += "f \(tri.0 + vertexOffset) \(tri.1 + vertexOffset) \(tri.2 + vertexOffset)\n"
             }
             vertexOffset += verts.count
@@ -171,10 +171,14 @@ extension ARGeometrySource {
     var count: Int { self.buffer.length / self.stride }
 }
 extension ARGeometryElement {
-    subscript(_ index: Int) -> (Int32, Int32, Int32) {
+    // Named method instead of `subscript(_:)` - ARKit's ARGeometryElement
+    // already has its own built-in subscript, and a second one with a
+    // different return type made every call site ambiguous to the compiler.
+    func triangle(at index: Int) -> (Int32, Int32, Int32) {
         let ptr = self.buffer.contents().advanced(by: index * Int(self.bytesPerIndex) * 3)
         let v = ptr.assumingMemoryBound(to: (Int32, Int32, Int32).self).pointee
         return v
     }
-    var count: Int { self.count }
+    // Note: .count is already provided by ARKit itself - no override needed
+    // (the previous version here accidentally called itself infinitely).
 }
