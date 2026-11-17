@@ -85,6 +85,11 @@ final class MultiCamCaptureSession: NSObject {
         }
     }
 
+    /// Set from the didStartRecordingTo delegate callback below - there is no
+    /// such property on AVCaptureMovieFileOutput itself, so we capture the
+    /// host-clock time ourselves at the moment recording actually begins.
+    private(set) var recordingStartHostTime: CMTime = .zero
+
     func startRecording(to url: URL) {
         multiCamSession.startRunning()
         movieOutput.startRecording(to: url, recordingDelegate: self)
@@ -96,13 +101,6 @@ final class MultiCamCaptureSession: NSObject {
         isRecording = false
     }
 
-    /// The host-clock timestamp of the moment recording actually started,
-    /// needed to convert each output frame's presentationTimeStamp into the
-    /// same timeline as ARFrame.timestamp from ARTrackerSession.
-    var recordingStartHostTime: CMTime {
-        movieOutput.recordingStartTime
-    }
-
     enum CaptureError: Error {
         case multiCamUnsupported, cannotAddInput, formatUnavailable
         case cannotAddOutput, noVideoPort, cannotAddConnection
@@ -110,6 +108,12 @@ final class MultiCamCaptureSession: NSObject {
 }
 
 extension MultiCamCaptureSession: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput,
+                     didStartRecordingTo fileURL: URL,
+                     from connections: [AVCaptureConnection]) {
+        recordingStartHostTime = CMClockGetTime(CMClockGetHostTimeClock())
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput,
                      didFinishRecordingTo outputFileURL: URL,
                      from connections: [AVCaptureConnection],
