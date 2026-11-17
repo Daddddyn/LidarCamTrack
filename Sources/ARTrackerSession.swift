@@ -103,7 +103,9 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
 
         // Flag it loudly if tracking degrades - limited-state frames are the
         // ones that will visibly slide. Don't silently ship those as "good" data.
-        if frame.camera.trackingState == .limited {
+        // `.limited` carries an associated Reason, so `== .limited` doesn't compile;
+        // pattern-match instead.
+        if case .limited = frame.camera.trackingState {
             print("⚠️ Tracking LIMITED at t=\(frame.timestamp) - expect drift risk here")
         }
     }
@@ -168,7 +170,7 @@ extension ARGeometrySource {
         let v = ptr.assumingMemoryBound(to: (Float, Float, Float).self).pointee
         return v
     }
-    var count: Int { self.buffer.length / self.stride }
+    // Note: .count is already provided by ARKit's ARGeometrySource - no override needed.
 }
 extension ARGeometryElement {
     // Named method instead of `subscript(_:)` - ARKit's ARGeometryElement

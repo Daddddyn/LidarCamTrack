@@ -29,13 +29,20 @@ jobs:
 
       - name: Archive (no code signing)
         run: |
+          set -o pipefail
+          mkdir -p build
           xcodebuild archive \
             -project LidarCamTrack.xcodeproj \
             -scheme LidarCamTrack \
             -sdk iphoneos \
             -archivePath build/LidarCamTrack.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee build/xcodebuild.log
+
+      - name: Show compiler errors
+        if: failure()
+        run: grep -E "error:" build/xcodebuild.log | sort -u || true
 
       - name: Package unsigned .ipa
         run: |

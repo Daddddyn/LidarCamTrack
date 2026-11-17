@@ -17,6 +17,7 @@
 
 import AVFoundation
 import ARKit
+import simd
 
 final class MultiCamCaptureSession: NSObject {
 
