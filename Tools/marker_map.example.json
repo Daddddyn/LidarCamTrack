@@ -1,0 +1,9 @@
+{
+  "_comment": "Rename to marker_map.json and replace positions with your real tape-measure measurements, in meters, in whatever origin/axes your ARKit session started in. size_m is the printed marker's physical edge length.",
+  "markers": [
+    { "id": 0, "position": [0.0, 0.0, 0.0], "size_m": 0.20 },
+    { "id": 1, "position": [3.2, 0.0, 1.1], "size_m": 0.20 },
+    { "id": 2, "position": [0.0, 0.0, 4.5], "size_m": 0.20 },
+    { "id": 3, "position": [3.2, 1.8, 4.5], "size_m": 0.20 }
+  ]
+}

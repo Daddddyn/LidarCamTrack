@@ -1,0 +1,50 @@
+# .github/workflows/build_ipa.yml
+#
+# You never need Xcode installed anywhere yourself - this generates the
+# Xcode project from project.yml (via XcodeGen) and builds it entirely on
+# GitHub's macOS runner, every time you push. Download the .ipa from the
+# run's "Artifacts" section afterward and sideload it with Sideloadly.
+
+name: Build IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project from project.yml
+        run: xcodegen generate
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+
+      - name: Archive (no code signing)
+        run: |
+          xcodebuild archive \
+            -project LidarCamTrack.xcodeproj \
+            -scheme LidarCamTrack \
+            -sdk iphoneos \
+            -archivePath build/LidarCamTrack.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned .ipa
+        run: |
+          mkdir -p build/Payload
+          cp -r build/LidarCamTrack.xcarchive/Products/Applications/LidarCamTrack.app build/Payload/
+          cd build && zip -r LidarCamTrack-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LidarCamTrack-unsigned
+          path: build/LidarCamTrack-unsigned.ipa
