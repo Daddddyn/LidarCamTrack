@@ -1,10 +1,10 @@
 //
 //  CaptureCoordinator.swift
 //
-//  The glue that was missing: owns one ARTrackerSession + one
-//  MultiCamCaptureSession, requests permissions, starts/stops both together,
-//  and exports everything to a folder you can pull off via the Files app
-//  (Documents is exposed - see Info.plist settings in project.yml).
+//  Owns the ARKit session. The camera preview + LiDAR scan start as soon as
+//  the app opens (so you can frame the shot and scan the set first); the
+//  Record button then starts writing 4K video + the per-frame pose track.
+//  Everything is exported to a Take_ folder visible in the Files app.
 //
 
 import AVFoundation
@@ -14,78 +14,110 @@ import Combine
 @MainActor
 final class CaptureCoordinator: ObservableObject {
 
+    @Published var isPreviewRunning = false
     @Published var isRecording = false
-    @Published var trackingStatus = "Not started"
+    @Published var showMesh = true
+    @Published var trackingStatus = "Starting..."
     @Published var frameCount = 0
+    @Published var meshTriangles = 0
+    @Published var recordingSeconds: Double = 0
+    @Published var videoFormatText = ""
     @Published var lastExportFolder: URL?
+    @Published var exportSummary: String?
     @Published var errorMessage: String?
 
-    private let arTracker = ARTrackerSession()
-    private let multiCam = MultiCamCaptureSession()
+    let arTracker = ARTrackerSession()
+    let lidarSupported = ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+
+    private var recorder: VideoRecorder?
     private var statusTimer: Timer?
     private var currentSessionFolder: URL?
+    private var recordingStart: Date?
 
-    func requestPermissionsAndPrepare() {
+    /// Called when the screen appears: asks for camera access, then starts
+    /// the live preview. Safe to call more than once.
+    func startPreview() {
+        guard !isPreviewRunning else { return }
         AVCaptureDevice.requestAccess(for: .video) { granted in
-            guard granted else {
-                Task { @MainActor in self.errorMessage = "Camera permission denied." }
-                return
+            Task { @MainActor in
+                guard granted else {
+                    self.errorMessage = "Camera permission denied. Enable it in Settings > LidarCamTrack."
+                    return
+                }
+                guard !self.isPreviewRunning else { return }
+                self.arTracker.start()
+                self.videoFormatText = self.arTracker.videoFormatDescription
+                self.isPreviewRunning = true
+                self.startStatusTimer()
             }
-            AVCaptureDevice.requestAccess(for: .audio) { _ in
-                Task { @MainActor in self.prepare() }
-            }
-        }
-    }
-
-    private func prepare() {
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            errorMessage = "No back wide-angle camera found."
-            return
-        }
-        do {
-            try multiCam.configure(using: device)
-        } catch {
-            errorMessage = "Multi-cam setup failed: \(error). Falls back to AR-only resolution if you proceed."
         }
     }
 
     func startCapture() {
-        guard !isRecording else { return }
+        guard isPreviewRunning, !isRecording else { return }
 
         let sessionFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Take_\(Int(Date().timeIntervalSince1970))")
         try? FileManager.default.createDirectory(at: sessionFolder, withIntermediateDirectories: true)
         currentSessionFolder = sessionFolder
 
-        arTracker.start()
-        multiCam.startRecording(to: sessionFolder.appendingPathComponent("video_4k24.mov"))
-        isRecording = true
+        let rec = VideoRecorder(url: sessionFolder.appendingPathComponent("video_4k24.mov"))
+        recorder = rec
+        arTracker.recorder = rec
+        arTracker.beginRecording()
 
-        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refreshStatus() }
-        }
+        errorMessage = nil
+        exportSummary = nil
+        recordingStart = Date()
+        recordingSeconds = 0
+        isRecording = true
     }
 
     func stopCapture() {
         guard isRecording else { return }
 
-        multiCam.stopRecording()
-        arTracker.stop()
+        arTracker.endRecording()
+        arTracker.recorder = nil
         isRecording = false
-        statusTimer?.invalidate()
 
         guard let folder = currentSessionFolder else { return }
+        let rec = recorder
+        recorder = nil
+
         do {
             try arTracker.exportTrack(to: folder)
             lastExportFolder = folder
-            trackingStatus = "Exported \(arTracker.frames.count) frames to \(folder.lastPathComponent)"
         } catch {
             errorMessage = "Export failed: \(error)"
+        }
+
+        if let setupError = rec?.setupError {
+            errorMessage = setupError
+        }
+
+        let poseCount = arTracker.frames.count
+        if let rec = rec {
+            rec.finish { [weak self] in
+                Task { @MainActor in
+                    self?.exportSummary = "\(rec.writtenFrames) video frames, \(poseCount) poses, \(rec.droppedFrames) dropped"
+                }
+            }
+        }
+    }
+
+    private func startStatusTimer() {
+        statusTimer?.invalidate()
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshStatus() }
         }
     }
 
     private func refreshStatus() {
+        trackingStatus = arTracker.latestTrackingState
         frameCount = arTracker.frames.count
-        trackingStatus = arTracker.frames.last?.trackingState ?? "waiting for first frame"
+        meshTriangles = arTracker.meshTriangleCount
+        if isRecording, let start = recordingStart {
+            recordingSeconds = Date().timeIntervalSince(start)
+        }
     }
 }

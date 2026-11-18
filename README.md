@@ -9,10 +9,11 @@ and exports a camera track + environment scan straight into Unreal.
 ```
 Sources/                       the iOS app
   LidarCamTrackApp.swift         SwiftUI entry point
-  ContentView.swift               record screen, status, export location
-  CaptureCoordinator.swift        starts/stops AR tracking + 4K video together
+  ContentView.swift               live preview + HUD, record button, export location
+  ARPreviewView.swift             camera preview with LiDAR mesh overlay
+  CaptureCoordinator.swift        starts preview, starts/stops recording, exports
   ARTrackerSession.swift          ARKit + LiDAR mesh, per-frame pose export
-  MultiCamCaptureSession.swift    the real 4K/24 capture + pose resampling
+  VideoRecorder.swift             writes ARKit's 4K frames to video_4k24.mov
 project.yml                    XcodeGen spec - this IS the Xcode project, as text
 .github/workflows/build_ipa.yml  builds the .ipa on GitHub's macOS runners
 Tools/
@@ -78,7 +79,7 @@ to a year; that's an Apple platform rule, nothing in this project changes it.
    the set spread out so most camera positions can see at least one.
 2. Measure each marker's real-world center position once; fill in
    `Tools/marker_map.example.json` (rename to `marker_map.json`).
-3. Open the app, hit **Start Recording**, shoot, hit **Stop & Export**.
+3. Open the app (live preview + LiDAR mesh appear; walk the set slowly to scan it), hit **Start Recording**, shoot, hit **Stop & Export**.
 4. In Files app → On My iPhone → LidarCamTrack → pull the `Take_...` folder
    off onto your PC (AirDrop, cable, or iCloud Drive all work).
 5. On your PC: `pip install opencv-contrib-python numpy scipy`, then:

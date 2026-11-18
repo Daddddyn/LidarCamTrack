@@ -3,9 +3,9 @@
 //  LidarCamTrack
 //
 //  Core capture engine: runs ARKit world tracking (with LiDAR scene depth +
-//  mesh reconstruction) for pose, while a parallel AVCaptureMultiCamSession
-//  input records true 4K/24fps video. Both are timestamped against the same
-//  host clock so pose can be resampled to exact video-frame times in post.
+//  mesh reconstruction). While recording, each ARFrame's pixels go to
+//  VideoRecorder (4K) and its pose goes to the track, so video frame N and
+//  pose N are the same ARFrame.
 //
 //  HONEST NOTE: this gives you very good VFX-grade tracking (what every
 //  mobile AR tracker in this class gives you), not a physically-impossible
@@ -37,8 +37,39 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
     private(set) var frames: [TrackedFrame] = []
     private var meshAnchors: [ARMeshAnchor] = []
 
+    /// While true, every ARFrame is written to `recorder` and logged in `frames`.
+    private(set) var isRecording = false
+    /// Updated on every frame, even when not recording (drives the live HUD).
+    private(set) var latestTrackingState = "waiting for first frame"
+    private(set) var videoFormatDescription = ""
+    var recorder: VideoRecorder?
+
+    var meshTriangleCount: Int {
+        meshAnchors.reduce(0) { $0 + $1.geometry.faces.count }
+    }
+
+    /// Prefer 4K at 24 fps, then 4K at 30 fps, then ARKit's recommended 4K
+    /// format. Falls back to ARKit's default (lower-res) format otherwise.
+    private static func pickVideoFormat() -> ARConfiguration.VideoFormat? {
+        let fourK = ARWorldTrackingConfiguration.supportedVideoFormats
+            .filter { Int($0.imageResolution.width) == 3840 }
+        if let f = fourK.first(where: { $0.framesPerSecond == 24 }) { return f }
+        if let f = fourK.first(where: { $0.framesPerSecond == 30 }) { return f }
+        return ARWorldTrackingConfiguration.recommendedVideoFormatFor4KResolution
+    }
+
+    /// Starts ARKit (camera preview + tracking + LiDAR scanning). Nothing is
+    /// recorded until `beginRecording()`. Tracking is NOT reset when recording
+    /// starts, so the mesh you scanned beforehand is part of the export.
     func start() {
         let config = ARWorldTrackingConfiguration()
+
+        if let format = Self.pickVideoFormat() {
+            config.videoFormat = format
+            videoFormatDescription = "\(Int(format.imageResolution.width))x\(Int(format.imageResolution.height)) @ \(format.framesPerSecond)fps"
+        } else {
+            videoFormatDescription = "default format (4K unavailable)"
+        }
 
         // LiDAR mesh of the environment - exported once at the end as the
         // "scanned set" reference geometry for Unreal (occlusion + lighting reference).
@@ -67,9 +98,27 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
         arSession.pause()
     }
 
+    func beginRecording() {
+        frames.removeAll()
+        isRecording = true
+    }
+
+    func endRecording() {
+        isRecording = false
+    }
+
     // MARK: ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        switch frame.camera.trackingState {
+        case .normal: latestTrackingState = "normal"
+        case .limited: latestTrackingState = "limited"
+        case .notAvailable: latestTrackingState = "notAvailable"
+        @unknown default: latestTrackingState = "unknown"
+        }
+
+        guard isRecording else { return }
+
         let t = frame.camera.transform
         let k = frame.camera.intrinsics
 
@@ -99,6 +148,13 @@ final class ARTrackerSession: NSObject, ARSessionDelegate {
             exposureDuration: frame.camera.exposureDuration,
             trackingState: stateString
         )
+
+        // Pose is only logged if the video frame was accepted, so
+        // camera_track.json entry N always matches video frame N.
+        if let recorder = recorder {
+            guard recorder.append(pixelBuffer: frame.capturedImage,
+                                  timestamp: frame.timestamp) else { return }
+        }
         frames.append(record)
 
         // Flag it loudly if tracking degrades - limited-state frames are the
